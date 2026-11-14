@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -33,8 +34,10 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.example.geoseek.data.Player
+import com.example.geoseek.engine.DuelOutcome
 import com.example.geoseek.engine.DuelState
 import com.example.geoseek.engine.duelStats
+import com.example.geoseek.engine.toDuelCard
 import com.example.geoseek.models.GameObject
 import com.example.geoseek.models.OBJECT_LIST
 
@@ -42,14 +45,16 @@ import com.example.geoseek.models.OBJECT_LIST
 @Composable
 fun VersusScreen(player: Player, onBack: () -> Unit, onFindCards: () -> Unit) {
     val owned = OBJECT_LIST.filter { it.name in player.cards }
-    var selectedName by rememberSaveable(player.username) { mutableStateOf<String?>(null) }
+    var selectedNames by rememberSaveable(player.username) { mutableStateOf(listOf("", "")) }
+    var selectedSlot by rememberSaveable(player.username) { mutableIntStateOf(0) }
     var battling by rememberSaveable(player.username) { mutableStateOf(false) }
-    val fighter = owned.firstOrNull { it.name == selectedName }
+    val selectedDeck = selectedNames.map { name -> owned.firstOrNull { it.name == name } }
+    val deckReady = selectedDeck.all { it != null }
     val accent = GeoColors.Danger
 
     BackHandler(enabled = battling) { battling = false }
-    if (battling && fighter != null) {
-        DuelArena(fighter, onBack = { battling = false })
+    if (battling && deckReady) {
+        DuelArena(selectedDeck.filterNotNull(), onBack = { battling = false })
         return
     }
 
@@ -68,7 +73,7 @@ fun VersusScreen(player: Player, onBack: () -> Unit, onFindCards: () -> Unit) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedText("PRACTICE ARENA", GeoType.Title, color = accent)
                     Text(
-                        "Choose a found card for a turn-based duel against a computer rival. Cards stay in your collection.",
+                        "Choose two cards for a turn-based duel against a computer rival. Cards stay in your collection.",
                         style = GeoType.Body, color = GeoColors.TextSoft,
                     )
                     Text("Local practice • No cards or XP at stake", style = GeoType.Caption, color = GeoColors.Gold)
@@ -89,22 +94,27 @@ fun VersusScreen(player: Player, onBack: () -> Unit, onFindCards: () -> Unit) {
         } else {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedText("Choose your fighter", GeoType.Heading)
-                    fighter?.let { card ->
-                        val stats = card.duelStats()
-                        Text("${card.name} • ${stats.health} HP • ${stats.attack} attack",
-                            style = GeoType.Body, color = GeoColors.TextSoft)
+                    OutlinedText("Choose your deck", GeoType.Heading)
+                    selectedNames.forEachIndexed { index, name ->
+                        PixelButton(
+                            "Card ${index + 1}: ${name.ifEmpty { "Choose a card" }}",
+                            { selectedSlot = index },
+                            Modifier.fillMaxWidth(),
+                            color = if (selectedSlot == index) accent else GeoColors.Gold,
+                        )
                     }
+                    Text("Tap a card below to fill the selected slot. Duplicate cards are allowed.",
+                        style = GeoType.Caption, color = GeoColors.TextSoft)
                     PixelButton(
-                        if (fighter == null) "Select a card below" else "Enter arena",
+                        if (deckReady) "Enter arena" else "Choose both cards below",
                         { battling = true },
                         Modifier.fillMaxWidth(),
-                        color = accent, enabled = fighter != null, icon = Icons.Versus,
+                        color = accent, enabled = deckReady, icon = Icons.Versus,
                     )
                 }
             }
             items(owned, key = { it.name }) { card ->
-                val isSelected = fighter?.name == card.name
+                val isSelected = card.name in selectedNames
                 Column(
                     Modifier.semantics { selected = isSelected },
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -113,7 +123,10 @@ fun VersusScreen(player: Player, onBack: () -> Unit, onFindCards: () -> Unit) {
                     TradingCard(
                         card, discovered = true,
                         modifier = if (isSelected) Modifier.pixelPanel(border = accent).padding(6.dp) else Modifier.padding(6.dp),
-                        onClick = { selectedName = card.name },
+                        onClick = {
+                            selectedNames = selectedNames.toMutableList().also { it[selectedSlot] = card.name }
+                            if (selectedSlot == 0 && selectedNames[1].isEmpty()) selectedSlot = 1
+                        },
                     )
                     Text(if (isSelected) "SELECTED" else "Tap to select",
                         style = GeoType.Caption, color = if (isSelected) accent else GeoColors.TextSoft)
@@ -124,29 +137,14 @@ fun VersusScreen(player: Player, onBack: () -> Unit, onFindCards: () -> Unit) {
 }
 
 @Composable
-private fun DuelArena(fighter: GameObject, onBack: () -> Unit) {
-    // A mirrored rival keeps practice fair for every rarity, including a player's very first card.
-    val stats = fighter.duelStats()
-    var playerHp by rememberSaveable(fighter.name) { mutableIntStateOf(stats.health) }
-    var rivalHp by rememberSaveable(fighter.name) { mutableIntStateOf(stats.health) }
-    var recoveries by rememberSaveable(fighter.name) { mutableIntStateOf(2) }
-    var turn by rememberSaveable(fighter.name) { mutableIntStateOf(1) }
-    var message by rememberSaveable(fighter.name) { mutableStateOf("Your move! Strike first or recover health.") }
-    val state = DuelState(playerHp, rivalHp, recoveries, turn)
+private fun DuelArena(deck: List<GameObject>, onBack: () -> Unit) {
+    val initialDeck = remember(deck) { deck.map { it.duelStats().toDuelCard() } }
+    val initialState = remember(deck) { DuelState(playerDeck = initialDeck, rivalDeck = initialDeck) }
+    var state by remember(deck) { mutableStateOf(initialState) }
     val accent = GeoColors.Danger
 
     fun play(recover: Boolean) {
-        val next = state.play(stats, stats, recover)
-        playerHp = next.playerHealth
-        rivalHp = next.rivalHealth
-        recoveries = next.recoveries
-        turn = next.turn
-        message = when {
-            rivalHp == 0 -> "Victory! Your ${fighter.name} wins the duel."
-            playerHp == 0 -> "Your card is knocked out. Try again!"
-            recover -> "You recovered up to 20 HP. Rival strikes for ${stats.attack}."
-            else -> "You strike for ${stats.attack}. Rival counters for ${stats.attack}."
-        }
+        state = state.play(recover)
     }
 
     Column(
@@ -161,32 +159,51 @@ private fun DuelArena(fighter: GameObject, onBack: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BattleCard(fighter, "YOU", playerHp, stats.health, GeoColors.Success, Modifier.weight(1f))
+            val playerCard = deck[state.playerActiveIndex]
+            val rivalCard = deck[state.rivalActiveIndex]
+            BattleCard(
+                playerCard, "YOU", state.playerActiveCard.currentHp, state.playerActiveCard.maxHp,
+                GeoColors.Success, Modifier.weight(1f),
+            )
             OutlinedText("VS", GeoType.Heading, color = accent)
-            BattleCard(fighter, "COMPUTER", rivalHp, stats.health, accent, Modifier.weight(1f))
+            BattleCard(
+                rivalCard, "COMPUTER", state.rivalActiveCard.currentHp, state.rivalActiveCard.maxHp,
+                accent, Modifier.weight(1f),
+            )
         }
         Panel(Modifier.widthIn(max = 600.dp).fillMaxWidth(), border = accent) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedText(
-                    if (state.finished) (if (rivalHp == 0) "VICTORY!" else "DEFEAT") else "TURN $turn",
-                    GeoType.Title, color = if (rivalHp == 0) GeoColors.Gold else accent,
+                    if (state.finished) {
+                        if (state.outcome == DuelOutcome.VICTORY) "VICTORY!" else "DEFEAT"
+                    } else {
+                        "TURN ${state.turn}"
+                    },
+                    GeoType.Title, color = if (state.outcome == DuelOutcome.VICTORY) GeoColors.Gold else accent,
                 )
-                Text(message, style = GeoType.Body, color = GeoColors.TextSoft)
+                Text(state.statusMessage.ifEmpty { "Your move! Strike, recover, or switch cards." },
+                    style = GeoType.Body, color = GeoColors.TextSoft)
                 if (!state.finished) {
-                    PixelButton("Strike • ${stats.attack} damage", { play(false) },
+                    PixelButton("Strike • ${state.playerActiveCard.attack} base damage", { play(false) },
                         Modifier.fillMaxWidth(), color = accent)
-                    PixelButton("Recover • ${recoveries} left", { play(true) },
+                    PixelButton("Recover • ${state.recoveries} left", { play(true) },
                         Modifier.fillMaxWidth(), color = GeoColors.Success,
-                        enabled = recoveries > 0 && playerHp < stats.health)
-                    Text("You act first, then the rival attacks. Recovery uses your turn.",
+                        enabled = state.recoveries > 0 && state.playerActiveCard.currentHp < state.playerActiveCard.maxHp)
+                    state.playerDeck.forEachIndexed { index, card ->
+                        if (index != state.playerActiveIndex && !card.isKnockedOut) {
+                            PixelButton(
+                                "Switch to card ${index + 1}: ${card.name} (${card.currentHp}/${card.maxHp} HP)",
+                                { state = state.swapCard(index) },
+                                Modifier.fillMaxWidth(),
+                                color = GeoColors.Gold,
+                            )
+                        }
+                    }
+                    Text("You act first, then the rival attacks. Recovery and switching use your turn.",
                         style = GeoType.Caption, color = GeoColors.TextSoft)
                 } else {
                     PixelButton("Rematch", {
-                        playerHp = stats.health
-                        rivalHp = stats.health
-                        recoveries = 2
-                        turn = 1
-                        message = "New duel. Your move!"
+                        state = initialState.copy(statusMessage = "New duel. Your move!")
                     }, Modifier.fillMaxWidth(), color = accent)
                     PixelButton("Choose another card", onBack, Modifier.fillMaxWidth(), color = GeoColors.Gold)
                 }
