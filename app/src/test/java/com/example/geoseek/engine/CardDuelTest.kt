@@ -1,11 +1,15 @@
 package com.example.geoseek.engine
 
+import com.example.geoseek.models.Card
 import com.example.geoseek.models.CardType
+import com.example.geoseek.models.GameObject
+import com.example.geoseek.models.Rarity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.random.Random
 
 class CardDuelTest {
     private fun card(
@@ -14,6 +18,9 @@ class CardDuelTest {
         attack: Int = 15,
         type: CardType = CardType.MISC,
     ) = DuelCard(name, maxHp = hp, attack = attack, cardType = type)
+
+    private fun collectible(name: String, rarity: Rarity, points: Int = 10) =
+        Card(obj = GameObject(name, rarity, points), xpValue = 0)
 
     @Test
     fun neutralStrikeDamagesBothActiveCards() {
@@ -130,5 +137,52 @@ class CardDuelTest {
     fun exhaustedRecoveryDoesNotAdvanceTurn() {
         val state = DuelState(listOf(card("Player")), listOf(card("Rival")), recoveries = 0)
         assertSame(state, state.play(recover = true))
+    }
+
+    @Test
+    fun opponentDeckMatchesSlotRarityAndUsesNearestTierWhenExactPoolRunsOut() {
+        val playerDeck = listOf(
+            collectible("Player common", Rarity.COMMON),
+            collectible("Player rare", Rarity.RARE, points = 20),
+        )
+        val available = listOf(
+            collectible("Rival common", Rarity.COMMON),
+            collectible("Rival epic", Rarity.EPIC, points = 20),
+        )
+
+        val opponentDeck = generateOpponentDeck(playerDeck, available, matchRarity = true, random = Random(1))
+
+        assertEquals(playerDeck.size, opponentDeck.size)
+        assertEquals(Rarity.COMMON, opponentDeck[0].obj.rarity)
+        assertEquals(Rarity.EPIC, opponentDeck[1].obj.rarity)
+        assertEquals(playerDeck[0].obj.duelStats().health, opponentDeck[0].obj.duelStats().health)
+        assertEquals(playerDeck[0].obj.duelStats().attack, opponentDeck[0].obj.duelStats().attack)
+    }
+
+    @Test
+    fun opponentDeckAllowsDuplicatesWhenPlayerDeckAndAvailablePoolHaveOneCard() {
+        val onlyCard = collectible("Only card", Rarity.UNCOMMON)
+        val playerDeck = listOf(onlyCard, onlyCard)
+
+        val opponentDeck = generateOpponentDeck(playerDeck, emptyList(), matchRarity = true, random = Random(2))
+
+        assertEquals(2, opponentDeck.size)
+        assertTrue(opponentDeck.all { it.id == onlyCard.id })
+        assertTrue(opponentDeck.all { it.obj.rarity == Rarity.UNCOMMON })
+    }
+
+    @Test
+    fun unmatchedOpponentDeckSelectsFromAnyAvailableRarity() {
+        val playerDeck = listOf(collectible("Player", Rarity.EPIC), collectible("Player copy", Rarity.EPIC))
+        val available = listOf(
+            collectible("Common rival", Rarity.COMMON),
+            collectible("Legendary rival", Rarity.LEGENDARY),
+            collectible("Rare rival", Rarity.RARE),
+        )
+
+        val opponentDeck = generateOpponentDeck(playerDeck, available, matchRarity = false, random = Random(3))
+
+        assertEquals(playerDeck.size, opponentDeck.size)
+        assertTrue(opponentDeck.all { rival -> available.any { it.id == rival.id } })
     }
 }

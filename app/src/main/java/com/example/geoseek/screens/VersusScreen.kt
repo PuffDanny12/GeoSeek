@@ -37,7 +37,9 @@ import com.example.geoseek.data.Player
 import com.example.geoseek.engine.DuelOutcome
 import com.example.geoseek.engine.DuelState
 import com.example.geoseek.engine.duelStats
+import com.example.geoseek.engine.generateOpponentDeck
 import com.example.geoseek.engine.toDuelCard
+import com.example.geoseek.models.Card
 import com.example.geoseek.models.GameObject
 import com.example.geoseek.models.OBJECT_LIST
 
@@ -138,8 +140,16 @@ fun VersusScreen(player: Player, onBack: () -> Unit, onFindCards: () -> Unit) {
 
 @Composable
 private fun DuelArena(deck: List<GameObject>, onBack: () -> Unit) {
-    val initialDeck = remember(deck) { deck.map { it.duelStats().toDuelCard() } }
-    val initialState = remember(deck) { DuelState(playerDeck = initialDeck, rivalDeck = initialDeck) }
+    val availableCards = remember { OBJECT_LIST.map { Card(obj = it, xpValue = 0) } }
+    val playerCards = remember(deck) { deck.map { Card(obj = it, xpValue = 0) } }
+    val opponentCards = remember(deck) {
+        generateOpponentDeck(playerCards, availableCards, matchRarity = true)
+    }
+    val playerBattleDeck = remember(deck) { playerCards.map { it.obj.duelStats().toDuelCard() } }
+    val opponentBattleDeck = remember(deck) { opponentCards.map { it.obj.duelStats().toDuelCard() } }
+    val initialState = remember(deck) {
+        DuelState(playerDeck = playerBattleDeck, rivalDeck = opponentBattleDeck)
+    }
     var state by remember(deck) { mutableStateOf(initialState) }
     val accent = GeoColors.Danger
 
@@ -153,14 +163,14 @@ private fun DuelArena(deck: List<GameObject>, onBack: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ScreenHeader("Card duel", "Local practice • Mirror rival", accent, onBack, Icons.Versus)
+        ScreenHeader("Card duel", "Local practice • Rarity-matched rival", accent, onBack, Icons.Versus)
         Row(
             Modifier.widthIn(max = 600.dp).fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val playerCard = deck[state.playerActiveIndex]
-            val rivalCard = deck[state.rivalActiveIndex]
+            val rivalCard = opponentCards[state.rivalActiveIndex].obj
             BattleCard(
                 playerCard, "YOU", state.playerActiveCard.currentHp, state.playerActiveCard.maxHp,
                 GeoColors.Success, Modifier.weight(1f),

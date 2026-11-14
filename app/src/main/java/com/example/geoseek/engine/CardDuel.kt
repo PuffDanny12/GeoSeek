@@ -1,9 +1,12 @@
 package com.example.geoseek.engine
 
+import com.example.geoseek.models.Card
 import com.example.geoseek.models.CardType
 import com.example.geoseek.models.GameObject
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.random.Random
 
 /** Local practice rules. Battles never consume collected cards or change account progress. */
 data class DuelStats(
@@ -19,6 +22,40 @@ fun GameObject.duelStats(): DuelStats = DuelStats(
     cardType = cardType,
     name = name,
 )
+
+/**
+ * Builds an opponent deck the same size as [playerDeck]. Matching mode prefers each player's
+ * rarity and falls back to the nearest unused tier; cards are reused only when the pool runs out.
+ */
+fun generateOpponentDeck(
+    playerDeck: List<Card>,
+    availableCards: List<Card>,
+    matchRarity: Boolean,
+    random: Random = Random.Default,
+): List<Card> {
+    if (playerDeck.isEmpty()) return emptyList()
+
+    val candidates = (availableCards.ifEmpty { playerDeck }).distinctBy { it.id }
+    val remaining = candidates.toMutableList()
+    return playerDeck.map { playerCard ->
+        val pool = remaining.ifEmpty { candidates }
+        val selected = if (!matchRarity) {
+            pool.random(random)
+        } else {
+            val exactRarity = remaining.filter { it.obj.rarity == playerCard.obj.rarity }
+            val rarityPool = if (exactRarity.isNotEmpty()) {
+                exactRarity
+            } else {
+                val fallbackPool = remaining.ifEmpty { candidates }
+                val nearestDistance = fallbackPool.minOf { abs(it.obj.rarity.ordinal - playerCard.obj.rarity.ordinal) }
+                fallbackPool.filter { abs(it.obj.rarity.ordinal - playerCard.obj.rarity.ordinal) == nearestDistance }
+            }
+            rarityPool.random(random)
+        }
+        remaining.removeAll { it.id == selected.id }
+        selected
+    }
+}
 
 data class DuelCard(
     val name: String,
