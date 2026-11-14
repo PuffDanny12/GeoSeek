@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -143,6 +144,7 @@ fun VersusScreen(player: Player, onBack: () -> Unit, onFindCards: () -> Unit) {
                         Switch(
                             checked = matchRarity,
                             onCheckedChange = { matchRarity = it },
+                            modifier = Modifier.semantics { contentDescription = "Match Opponent Rarity" },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = GeoColors.Highlight,
                                 checkedTrackColor = GeoColors.Gold.copy(alpha = 0.5f),
