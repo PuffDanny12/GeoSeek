@@ -2,6 +2,7 @@ package com.example.geoseek.screens
 
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
@@ -17,6 +18,7 @@ import com.example.geoseek.engine.questForDay
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -114,5 +116,43 @@ class ScreensUiTest {
 
         text("x3").assertIsDisplayed()
         assertEquals(0, compose.onAllNodesWithText("x1").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun versus_buildsDuplicateDeckAndAllowsActiveCardSwap() {
+        compose.setContent {
+            VersusScreen(
+                player(binder = mapOf("Chair" to CardRecord(1, 0L))),
+                onBack = {},
+                onFindCards = {},
+            )
+        }
+
+        text("Match Opponent Rarity").assertIsDisplayed()
+        text("Choose both cards below").assertIsDisplayed()
+        text("Chair").performClick()
+        compose.onAllNodesWithText("Choose both cards below").onFirst().assertIsNotEnabled()
+        text("Chair").performClick()
+        text("Household").assertIsDisplayed()
+        text("Start Battle").performClick()
+
+        text("YOUR BENCH").assertIsDisplayed()
+        text("OPPONENT BENCH").assertIsDisplayed()
+        compose.onAllNodesWithText("Swap").onFirst().performClick()
+        compose.onAllNodesWithText("Swapped to Chair!", substring = true).onFirst().assertIsDisplayed()
+    }
+
+    @Test
+    fun versus_withoutCardsShowsPromptAndFindAction() {
+        var findCardsRequested = false
+        compose.setContent {
+            VersusScreen(player(), onBack = {}, onFindCards = { findCardsRequested = true })
+        }
+
+        text("Find an object in Free Look to unlock a card. You can use that card in both deck slots.")
+            .assertIsDisplayed()
+        text("Find cards").performClick()
+
+        compose.runOnIdle { assertTrue(findCardsRequested) }
     }
 }
